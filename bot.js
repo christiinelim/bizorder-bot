@@ -23,6 +23,12 @@ async function fetchSellerData(sellerId) {
     return data;
 }
 
+async function fetchSellerItemsData(sellerId){
+    const response = await axios.get(`http://localhost:8080/item/seller/${sellerId}`);
+    const data = response.data.data;
+    return data;
+}
+
 
 
 (async () => {
@@ -67,24 +73,30 @@ async function fetchSellerData(sellerId) {
 
         } else if (currentOption == "View seller profile") {
             if (selectedSellerId){
-                await onViewProfileClick(msg);
-                
+                await onViewProfileClick(msg);   
             } 
+        } else if (currentOption == "View products"){
+            if (selectedSellerId){
+                await onViewProductsClick(msg);
+            }
         } else if (currentOption == "Back") {
-            currentOption = previousOption;
-            previousOption = "Back";
 
-            console.log(currentOption)
+            currentOption = previousOption;
             
             if (currentOption == "View seller profile") {
+                currentOption = selectedSeller;
                 await onSellerClick(msg, selectedSeller);
 
             } else if (currentOption == "Make a purchase") {
                 await start(msg);
 
             } else if (sellerList.includes(currentOption)) {
+                currentOption = "Make a purchase";
                 await purchase(msg);
                 
+            } else if (currentOption == "View products") {
+                currentOption = selectedSeller;
+                await onSellerClick(msg, selectedSeller);
             }
         }
         
@@ -183,6 +195,43 @@ async function onViewProfileClick(msg) {
     await bot.sendMessage(
         msg.chat.id,
         `Instagram: ${sellerData.instagram}\nTikTok: ${sellerData.tiktok}\nCarousell: ${sellerData.carousell}`,
+        {
+            reply_markup: {
+                keyboard: [
+                    [{ text: "Back" }], 
+                    [{ text: "Exit" }]
+                ],
+                resize_keyboard: true,
+                one_time_keyboard: true
+            }
+        }
+    );
+}
+
+
+
+
+// VIEW PRODUCTS
+async function onViewProductsClick(msg) {
+    const sellerItems = await fetchSellerItemsData(selectedSellerId);
+    const itemMap = {};
+    const itemList = sellerItems.map((item) => {
+        itemMap[item.name] = item.itemId;
+        return item.name;
+    });
+
+    let message = '';
+    sellerItems.forEach(item => {
+        message += `Product: ${item.name}\n`;
+        message += `Cost: ${item.cost}\n`;
+        message += `Description: ${item.description}\n`;
+        message += `Reference: ${item.reference}\n`;
+        message += `Available Stocks: ${item.stock_on_hand}\n\n`;
+    });
+
+    await bot.sendMessage(
+        msg.chat.id,
+        message,
         {
             reply_markup: {
                 keyboard: [
