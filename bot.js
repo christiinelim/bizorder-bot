@@ -1,3 +1,4 @@
+
 const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
 const data = require('./data');
@@ -30,6 +31,8 @@ let itemMap = {};
 let itemCount = 0;
 let note = "";
 let cartOut = false;
+let view_purchase = false;
+let view_order_id;
 const token = process.env.API_KEY;
 
 
@@ -70,11 +73,11 @@ const token = process.env.API_KEY;
             purchase_information = false;
             await purchase(msg);
 
-        } else if (currentOption == "Edit a purchase") {
+        } else if (currentOption == "View purchase") {
             resetCustomerInformation();
             purchase_information = false;
-            await editPurchase(msg);
-
+            await displayViewPurchase(msg);
+            view_purchase = true;
         } else if (sellerList.includes(currentOption)) {
             resetCustomerInformation();
             purchase_information = false;
@@ -118,11 +121,7 @@ const token = process.env.API_KEY;
         } else if (currentOption == "Submit"){
             purchase_information = false;
             quantity_check = false;
-
             await sendOrder();
-
-            
-
         } else if (cartOut & currentOption == "Add a note") {
             await addNoteMessage(msg);
         } else if (cartOut & currentOption != "Add a note") {
@@ -140,7 +139,13 @@ const token = process.env.API_KEY;
                 await onSelectItem(msg);
                 quantity_check = false;
             }
-        } 
+        } else if (view_purchase){
+            view_order_id = msg.text;
+            if (view_order_id){
+                await displayPurchase(msg);
+                view_purchase = null;
+            }
+        }
         
         
         
@@ -150,6 +155,7 @@ const token = process.env.API_KEY;
         
         else if (currentOption == "Back") {
             resetCustomerInformation();
+            view_purchase = false;
 
             currentOption = previousOption;
             
@@ -167,6 +173,8 @@ const token = process.env.API_KEY;
             } else if (currentOption == "View products") {
                 currentOption = selectedSeller;
                 await onSellerClick(msg, selectedSeller);
+            } else {
+                await start(msg);
             }
         }     
         else if (currentOption == "Exit"){
@@ -198,7 +206,7 @@ function start(msg) {
             reply_markup: {
                 keyboard: [
                     [{ text: "Make a purchase" }], 
-                    [{ text: "Edit a purchase" }],
+                    [{ text: "View purchase" }],
                     [{ text: "Exit" }]
                 ],
                 resize_keyboard: true,
@@ -225,7 +233,7 @@ function purchase(msg) {
 
 
 // EDIT
-function editPurchase(msg) {
+function displayViewPurchase(msg) {
     bot.sendMessage(
         msg.chat.id,
         "Please key in the order number"
@@ -476,6 +484,24 @@ async function sendOrder() {
             }
         });
     }
+}
+
+async function displayPurchase(msg){
+    const purchaseData = await data.getOrder(view_order_id);
+    await bot.sendMessage(
+        msg.chat.id,
+        `Purchased from: ${purchaseData[0].order.seller.name}\nItem: ${purchaseData[0].item.name}\nQuantity: ${purchaseData[0].quantity}`,
+        {
+            reply_markup: {
+                keyboard: [
+                    [{ text: "Back" }], 
+                    [{ text: "Exit" }]
+                ],
+                resize_keyboard: true,
+                one_time_keyboard: true
+            }
+        }
+    );
 }
 
 

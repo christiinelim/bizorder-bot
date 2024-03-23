@@ -51,11 +51,23 @@ async function postPurchaseData(purchaseInfo){
     }
 }
 
+async function getOrder(orderId){
+    try {
+        const response = await axios.get(`http://localhost:8080/purchase/order/${orderId}`);
+        const data = response.data.data;
+        return data;
+    } catch (error) {
+        console.error('Error:', error);
+        throw error;
+    }
+}
+
 module.exports = {
     getSellersData,
     getSellerData,
     getSellerItemsData,
     postCustomerData,
     postOrderData,
-    postPurchaseData
+    postPurchaseData,
+    getOrder
 };
