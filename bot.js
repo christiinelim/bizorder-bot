@@ -1,5 +1,6 @@
 const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
+const data = require('./data');
 const { createConnection } = require('mysql2/promise');
 require('dotenv').config();
 
@@ -9,32 +10,35 @@ let keyboardOptions;
 let selectedSellerId;
 let selectedSeller;
 let bot;
+let customer_information = false;
+const customer_info = {
+    "name": "name",
+    "contact": "contact",
+    "delivery address": "address",
+    "payment method": "paymentMethod",
+    "collection method": "collectionMethod"
+};
+const customer_query = ["name", "contact", "delivery address", "payment method", "collection method"];
+let customerInfo = {};
+let customer_information_count = 0;
+let purchase_information = false;
+let quantity_check = false;
+let item_chosen;
+let quantity_chosen;
+let order = [];
+let itemMap = {};
+let itemCount = 0;
+let note = "";
+let cartOut = false;
 const token = process.env.API_KEY;
 
-async function fetchSellersData() {
-    const response = await axios.get("http://localhost:8080/seller");
-    const data = response.data.data;
-    return data;
-}
-
-async function fetchSellerData(sellerId) {
-    const response = await axios.get(`http://localhost:8080/seller/${sellerId}`);
-    const data = response.data.data;
-    return data;
-}
-
-async function fetchSellerItemsData(sellerId){
-    const response = await axios.get(`http://localhost:8080/item/seller/${sellerId}`);
-    const data = response.data.data;
-    return data;
-}
 
 
 
 (async () => {
-    const data = await fetchSellersData();
+    const sellersData = await data.getSellersData();
     const sellerMap = {};
-    const sellerList = data.map((seller) => {
+    const sellerList = sellersData.map((seller) => {
         sellerMap[seller.name] = seller.sellerId;
         return seller.name;
     });
@@ -57,15 +61,23 @@ async function fetchSellerItemsData(sellerId){
         previousOption = currentOption;
         currentOption = msg.text;
         if (msg.text == '/start') {
+            resetCustomerInformation();
+            purchase_information = false;
             await start(msg);
 
         } else if (currentOption == "Make a purchase") {
+            resetCustomerInformation();
+            purchase_information = false;
             await purchase(msg);
 
         } else if (currentOption == "Edit a purchase") {
+            resetCustomerInformation();
+            purchase_information = false;
             await editPurchase(msg);
 
         } else if (sellerList.includes(currentOption)) {
+            resetCustomerInformation();
+            purchase_information = false;
             selectedSeller = currentOption;
             selectedSellerId = sellerMap[selectedSeller];
 
@@ -73,13 +85,71 @@ async function fetchSellerItemsData(sellerId){
 
         } else if (currentOption == "View seller profile") {
             if (selectedSellerId){
+                resetCustomerInformation();
+                purchase_information = false;
                 await onViewProfileClick(msg);   
             } 
         } else if (currentOption == "View products"){
             if (selectedSellerId){
+                resetCustomerInformation();
+                purchase_information = false;
                 await onViewProductsClick(msg);
             }
-        } else if (currentOption == "Back") {
+        } else if (currentOption == "Place order"){
+            if (selectedSellerId){
+                customer_information = true;
+                purchase_information = false;
+                await onPlaceOrderClick(msg, customer_information_count);
+            }
+        } else if (customer_information){
+            currentOption = "Place order";
+            customerInfo[customer_info[customer_query[customer_information_count]]] = msg.text;
+            customer_information_count += 1;
+            if (customer_information_count == 5) {
+                resetCustomerInformation();
+                purchase_information = true;
+                await onSelectItem(msg);
+            } else {
+                await onPlaceOrderClick(msg, customer_information_count);
+            }
+        } else if (currentOption == "Cart out"){
+            await onCartOutClick(msg);
+            cartOut = true;
+        } else if (currentOption == "Submit"){
+            purchase_information = false;
+            quantity_check = false;
+
+            await sendOrder();
+
+            
+
+        } else if (cartOut & currentOption == "Add a note") {
+            await addNoteMessage(msg);
+        } else if (cartOut & currentOption != "Add a note") {
+            note = msg.text;
+            await submitMessage(msg);
+        } else if (purchase_information & currentOption != "Submit"){
+            if (!quantity_check) {
+                item_chosen = parseInt(itemMap[msg.text]);
+                await onItemClick(msg);
+                quantity_check = true;
+            } else {
+                quantity_chosen = parseInt(msg.text);
+                order.push([item_chosen, quantity_chosen])
+                itemCount += 1;
+                await onSelectItem(msg);
+                quantity_check = false;
+            }
+        } 
+        
+        
+        
+        
+        
+        
+        
+        else if (currentOption == "Back") {
+            resetCustomerInformation();
 
             currentOption = previousOption;
             
@@ -98,17 +168,14 @@ async function fetchSellerItemsData(sellerId){
                 currentOption = selectedSeller;
                 await onSellerClick(msg, selectedSeller);
             }
-        }
-        
-        
-        
-        
-        
+        }     
         else if (currentOption == "Exit"){
+            resetCustomerInformation();
             bot.sendMessage(
                 msg.chat.id, `You have exited. Please type /start to begin again`
             )
         } else {
+            resetCustomerInformation();
             bot.sendMessage(
                 msg.chat.id, `Please type /start to begin`
             )
@@ -118,7 +185,7 @@ async function fetchSellerItemsData(sellerId){
     
 })();
 
-module.exports = bot;
+
 
 
 
@@ -190,7 +257,7 @@ function onSellerClick(msg, selectedSeller) {
 
 // VIEW PROFILE
 async function onViewProfileClick(msg) {
-    const sellerData = await fetchSellerData(selectedSellerId);
+    const sellerData = await data.getSellerData(selectedSellerId);
 
     await bot.sendMessage(
         msg.chat.id,
@@ -213,8 +280,7 @@ async function onViewProfileClick(msg) {
 
 // VIEW PRODUCTS
 async function onViewProductsClick(msg) {
-    const sellerItems = await fetchSellerItemsData(selectedSellerId);
-    const itemMap = {};
+    const sellerItems = await data.getSellerItemsData(selectedSellerId);
     const itemList = sellerItems.map((item) => {
         itemMap[item.name] = item.itemId;
         return item.name;
@@ -244,3 +310,174 @@ async function onViewProductsClick(msg) {
         }
     );
 }
+
+
+// PLACE ORDER
+async function onPlaceOrderClick(msg, count){
+    if (count < 2){
+        await bot.sendMessage(msg.chat.id, `Please enter your ${customer_query[count]}`);
+    } else if (count == 2) {
+        await bot.sendMessage(msg.chat.id, `Please enter your delivery ${customer_query[count]} if applicable, else indicate NA`);
+    } else if (count == 3) {
+        await bot.sendMessage(
+            msg.chat.id,
+            `Please choose your ${customer_query[count]}`,
+            {
+                reply_markup: {
+                    keyboard: [
+                        [{ text: "PayNow" }], 
+                        [{ text: "Cash" }]
+                    ],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            }
+        );
+    } else {
+        await bot.sendMessage(
+            msg.chat.id,
+            `Please choose your ${customer_query[count]}`,
+            {
+                reply_markup: {
+                    keyboard: [
+                        [{ text: "Meet up" }], 
+                        [{ text: "Delivery" }]
+                    ],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            }
+        );
+    }
+}
+
+
+// RESET CUSTOMER INFORMATION
+function resetCustomerInformation(){
+    customer_information = false;
+    customer_information_count = 0;
+}
+
+
+// CHOOSE ITEM
+async function onSelectItem(msg){
+    const sellerItems = await data.getSellerItemsData(selectedSellerId);
+    const itemList = sellerItems.map((item) => {
+        itemMap[item.name] = item.itemId;
+        return item.name;
+    });
+
+    const itemOptions = sellerItems.map((item) => [{ text: item.name }]);
+
+    if (itemCount == 0){
+        bot.sendMessage(
+            msg.chat.id,
+            `Please select the item you like to purchase`,
+            {
+                reply_markup: {
+                    keyboard: itemOptions,
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            }
+        );
+    } else {
+        itemOptions.push([{ text: "Cart out" }]);
+        bot.sendMessage(
+            msg.chat.id,
+            `Please select the next item you like to purchase if any`,
+            {
+                reply_markup: {
+                    keyboard: itemOptions,
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            }
+        );
+    }
+}
+
+
+// CHOOSE QUANTITY
+function onItemClick(msg){
+    bot.sendMessage(msg.chat.id, `Please indicate the quantity`);
+}
+
+function onCartOutClick(msg) {
+    bot.sendMessage(
+        msg.chat.id,
+        `Please add a note if you have any remark for the seller, else click Submit`,
+        {
+            reply_markup: {
+                keyboard: [
+                    [{ text: "Add a note" }],
+                    [{ text: "Submit" }]
+                ],
+                resize_keyboard: true,
+                one_time_keyboard: true
+            }
+        }
+    );
+}
+
+function addNoteMessage(msg) {
+    bot.sendMessage(
+        msg.chat.id,
+        `Please add a remark for your order`,
+    );
+}
+
+function submitMessage(msg){
+    bot.sendMessage(
+        msg.chat.id,
+        `Click submit to send your order`,
+        {
+            reply_markup: {
+                keyboard: [
+                    [{ text: "Submit" }]
+                ],
+                resize_keyboard: true,
+                one_time_keyboard: true
+            }
+        }
+    );
+}
+
+async function sendOrder() {
+    // insert customer info
+    const responseCustomer = await data.postCustomerData(customerInfo);
+    const customerIdIndex = responseCustomer.data.lastIndexOf(' ');
+    const customerId = responseCustomer.data.substring(customerIdIndex + 1);
+
+    // insert order info
+    const responseOrder = await data.postOrderData({
+        "note": note,
+        "paid": "No",
+        "status": "Pending",
+        "customer": {
+            "customerId": customerId
+        },
+        "seller": {
+            "sellerId": selectedSellerId
+        }
+    });
+    const orderIdIndex = responseOrder.data.lastIndexOf(' ');
+    const orderId = responseOrder.data.substring(orderIdIndex + 1);
+
+    // insert order [[itemId, quantity]]
+    for (let item of order){
+        await data.postPurchaseData({
+            "quantity": item[1],
+            "item": {
+                "itemId": item[0]
+            },
+            "order": {
+                "orderId": orderId
+            }
+        });
+    }
+}
+
+
+
+module.exports = bot;
